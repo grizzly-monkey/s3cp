@@ -33,10 +33,11 @@ Gem::Specification.new do |s|
   s.required_rubygems_version = ">= 1.3.6"
 
   s.add_dependency("extensions", ["~> 0.6"])
-  s.add_dependency("highline", [">= 1.5.1"])
-  s.add_dependency("aws-sdk", ["1.67.0"])
-  s.add_dependency("progressbar", ["~> 0.10.0"])
-  s.add_dependency("nokogiri", ["~> 1.8.4"])
+  s.add_dependency("highline", [">= 1.7.8"])
+  s.add_dependency("aws-sdk-core")
+  s.add_dependency("aws-sdk-s3", ["1.42.0"])
+  s.add_dependency("progressbar", ["~>1.10.0"])
+  s.add_dependency("nokogiri", ["~> 1.10.3"])
 
   s.add_development_dependency("rspec", ["~> 2.5.0"])
   s.add_development_dependency("rake", ["~> 0.8.7"])

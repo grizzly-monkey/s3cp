@@ -33,7 +33,7 @@ options[:multipart] = case ENV["S3CP_MULTIPART"]
   when /\d+/
     ENV["S3CP_MULTIPART"].to_i
   else
-    true
+    false
   end
 options[:include_regex] = []
 options[:exclude_regex] = []
@@ -268,16 +268,7 @@ end
 
 def s3_to_s3(bucket_from, key, bucket_to, dest, options = {})
   log(with_headers("#{operation(options)} s3://#{bucket_from}/#{key} to s3://#{bucket_to}/#{dest}"))
-  s3_source = @s3.buckets[bucket_from].objects[key]
-  s3_dest = @s3.buckets[bucket_to].objects[dest]
-  s3_options = {}
-  S3CP.set_header_options(s3_options, @headers)
-  s3_options[:acl] = options[:acl] if options[:acl]
-  unless options[:move]
-    s3_source.copy_to(s3_dest, s3_options)
-  else
-    s3_source.move_to(s3_dest, s3_options)
-  end
+  @s3.client.copy_object(bucket: bucket_to, copy_source: bucket_from + '/' + key, key: dest)
 end
 
 def local_to_s3(bucket_to, key, file, options = {})
@@ -313,37 +304,13 @@ def local_to_s3(bucket_to, key, file, options = {})
       end
 
       begin
-        obj = @s3.buckets[bucket_to].objects[key]
+        obj = @s3.bucket(bucket_to).object(key)
 
         s3_options = {}
         S3CP.set_header_options(s3_options, @headers)
-        s3_options[:acl] = options[:acl] if options[:acl]
-        s3_options[:content_length] = File.size(file)
+        s3_options['content-length'] = File.size(file).to_s
 
-        multipart_threshold = options[:multipart].is_a?(Fixnum) ?  options[:multipart] : AWS.config.s3_multipart_threshold
-        if (expected_md5 != nil) && (File.size(file) >= multipart_threshold) && options[:multipart]
-          meta = s3_options[:metadata] || {}
-          meta[:md5] = expected_md5
-          s3_options[:metadata] = meta
-        end
-
-        if options[:multipart]
-          s3_options[:multipart_threshold] = multipart_threshold
-        else
-          s3_options[:single_request] = true
-        end
-
-        progress_bar = if $stdout.isatty
-          ProgressBar.new(File.basename(file), File.size(file)).tap do |p|
-            p.file_transfer_mode
-          end
-        end
-
-        File.open(file) do |io|
-          obj.write(ProxyIO.new(io, progress_bar), s3_options)
-        end
-
-        progress_bar.finish if progress_bar
+       obj.upload_file(file, metadata: s3_options)
 
         if options[:checksum]
           actual_md5 = s3_checksum(bucket_to, key)
@@ -358,11 +325,7 @@ def local_to_s3(bucket_to, key, file, options = {})
         end
       rescue => e
         actual_md5 = "bad"
-        if progress_bar
-          progress_bar.clear
-          $stderr.puts "Error copying #{file} to s3://#{bucket_to}/#{key}"
-        end
-        raise e if !options[:checksum] || e.is_a?(AWS::S3::Errors::AccessDenied)
+        raise e if !options[:checksum] || e.is_a?(Aws::S3::Errors::AccessDenied)
         $stderr.puts e
       end
       retries += 1
@@ -408,31 +371,18 @@ def s3_to_local(bucket_from, key_from, dest, options = {})
       end
 
       if !options[:sync] || expected_md5.nil? || (expected_md5 != actual_md5)
-        f = File.new(dest, "wb")
         begin
-          progress_bar = if $stdout.isatty
-            size = s3_size(bucket_from, key_from)
-            ProgressBar.new(File.basename(key_from), size).tap do |p|
-              p.file_transfer_mode
-            end
-          end
-          @s3.buckets[bucket_from].objects[key_from].read_as_stream do |chunk|
-            f.write(chunk)
-            progress_bar.inc chunk.size if progress_bar
-          end
-          progress_bar.finish if progress_bar
+          @s3.bucket(bucket_from).object(key_from).get(response_target: dest)
         rescue => e
-          progress_bar.halt if progress_bar
           raise e
         ensure
-          f.close()
         end
       else
         log("Already synchronized")
         return
       end
     rescue => e
-      raise e if e.is_a?(AWS::S3::Errors::NoSuchKey)
+      raise e if e.is_a?(Aws::S3::Errors::NoSuchKey)
       raise e unless options[:checksum]
       $stderr.puts e
     end
@@ -456,20 +406,11 @@ end
 
 def s3_checksum(bucket, key)
   begin
-    metadata = @s3.buckets[bucket].objects[key].head()
-    return :not_found unless metadata
+    md5 = @s3.bucket(bucket).object(key).etag
+    return md5 ? md5.sub(/^"/, "").sub(/"$/, "") : :not_found
   rescue => e
-    return :not_found if e.is_a?(AWS::S3::Errors::NoSuchKey)
+    return :not_found if e.is_a?(Aws::S3::Errors::NoSuchKey)
     raise e
-  end
-
-  case
-  when metadata[:meta] && metadata[:meta]["md5"]
-    metadata[:meta]["md5"]
-  when metadata[:etag] && metadata[:etag] !~ /-/
-    metadata[:etag].sub(/^"/, "").sub(/"$/, "") # strip beginning and trailing quotes
-  else
-    :invalid
   end
 end
 
@@ -482,7 +423,7 @@ def key_path(prefix, key)
 end
 
 def s3_size(bucket, key)
-  @s3.buckets[bucket].objects[key].content_length
+  @s3.bucket(bucket).object(key).size
 end
 
 def copy(from, to, options)

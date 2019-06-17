@@ -154,10 +154,10 @@ S3CP.standard_exception_handling(options) do
     end
 
     begin
-      @s3.buckets[@bucket].objects[@key].delete() unless options[:test]
+      @s3.bucket(@bucket).object(@key).delete() unless options[:test]
     rescue => e
       puts e.to_s
-      raise e unless e.is_a? AWS::S3::Errors::NoSuchKey
+      raise e unless e.is_a? Aws::S3::Errors::NoSuchKey
     end
   end
 end

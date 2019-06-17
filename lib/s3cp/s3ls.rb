@@ -109,7 +109,7 @@ S3CP.standard_exception_handling(options) do
   begin
     display = lambda do |entry|
       # add '---' separator line between directories and files
-      if options[:delimiter] && directories && entry.is_a?(AWS::S3::Tree::LeafNode)
+      if options[:delimiter] && directories && entry.is_a?(Aws::S3::Tree::LeafNode)
         directories = false
         puts "---"
       end

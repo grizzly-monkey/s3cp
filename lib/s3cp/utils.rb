@@ -17,7 +17,7 @@
 
 require 'rubygems'
 require 'extensions/kernel' if RUBY_VERSION =~ /^1.8/
-require 'aws/s3'
+require 'aws-sdk-s3'
 require 'optparse'
 require 'date'
 require 'highline/import'
@@ -40,18 +40,22 @@ module S3CP
   }
 
   # Connect to AWS S3
+  # @return Aws::S3::Resource
   def connect()
     options = {}
 
     # optional region override
-    region = ENV["S3CP_REGION"]
-    options[:s3_endpoint] = "s3-#{region}.amazonaws.com" if region && region != "us-east-1"
-
+    s3cp_region = ENV["S3CP_REGION"].nil? ? "us-east-1" : ENV["S3CP_REGION"]
     # optional endpoint override
-    endpoint = ENV["S3CP_ENDPOINT"]
-    options[:s3_endpoint] = endpoint if endpoint
+    s3cp_endpoint = ENV["S3CP_ENDPOINT"].nil? ? "https://s3.#{s3cp_region}.amazonaws.com" : ENV["S3CP_ENDPOINT"]
 
-    ::AWS::S3.new(options)
+    if s3cp_endpoint.include?('fips')
+      fips_region = s3cp_endpoint.split(".")[1]
+      s3cp_client = Aws::S3::Client.new(region: fips_region,endpoint: s3cp_endpoint)
+    else
+      s3cp_client = Aws::S3::Client.new(region:s3cp_region, force_path_style:true , endpoint: s3cp_endpoint)
+    end
+    Aws::S3::Resource.new(client: s3cp_client)
   end
 
   # Load user-defined configuration file (e.g. to initialize AWS.config object)
@@ -209,13 +213,6 @@ module S3CP
         end
       end
     end
-
-    metadata = {}
-    remaining.each do |k,v|
-      metadata[k] = v
-    end
-    options[:metadata] = metadata if metadata
-
     options
   end
 
@@ -300,7 +297,7 @@ end
 # Monkey-patch to add requester-pays support (experimental)
 # http://docs.amazonwebservices.com/AmazonS3/latest/dev/ObjectsinRequesterPaysBuckets.html
 if ENV["S3CP_REQUESTER_PAYS"] =~ /(yes|on|1)/i
-  class AWS::S3::Request
+  class Aws::S3::Request
     def canonicalized_headers
       headers["x-amz-request-payer"] = 'requester' # magic!
       x_amz = headers.select{|name, value| name.to_s =~ /^x-amz-/i }
